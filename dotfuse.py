@@ -11,6 +11,8 @@ import errno   # for error number codes (ENOENT, etc)
                # - note: these must be returned as negatives
 
 from os.path import join as J
+import jinja2
+
 fuse.fuse_python_api = (0, 2)
 
 def run_template(path):
@@ -31,6 +33,9 @@ class DotFS(Fuse):
             os.mkdir(self.abspath)
         elif not os.path.isdir(self.abspath):
             raise Exception("Problem with abspath")
+
+        # TODO: Put a context in here with whatever.
+        self.tmpl = jinja2.Environment(loader=jinja2.FileSystemLoader(self.abspath))
 
         print 'Init complete.'
 
@@ -112,7 +117,9 @@ class DotFS(Fuse):
         if not os.path.exists(J(self.abspath, first, first[1:])):
             return 0
         try:
+            # First line testing, second, eventual production
             x = run_template(J(self.abspath, first, first[1:]))
+            # self.render_config(J(first)/first[1:])
         except Exception, e:
             log('Exception running template for %s: %s' %
                     (J(self.abspath, first, first[1:]), e))
@@ -122,6 +129,15 @@ class DotFS(Fuse):
         fd.write(x)
         fd.close()
         return 0
+
+    def render_config(self, path):
+        t = self.tmpl_render.get_template(path)
+        dfname = os.path.split()[-1]
+        dfname = os.path.expanduser("~/.%s" % dfname)
+        fd = open(dfname, 'w')
+        fd.write(t.render())
+        fd.close()
+
 
 if __name__ == '__main__':
     fs = DotFS()
