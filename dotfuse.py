@@ -120,9 +120,10 @@ class DotFS(Fuse):
         fd.close()
         return 0
 
-if __name__ == __main__:
+if __name__ == '__main__':
     fs = DotFS()
     fs.flags = 0
     fs.multithreaded = 0
+    f.parse()
     fs.main()
 
