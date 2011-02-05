@@ -10,6 +10,7 @@ import errno   # for error number codes (ENOENT, etc)
                # - note: these must be returned as negatives
 
 from os.path import join as J
+fuse.fuse_python_api = (0, 2)
 
 def run_template(path):
     res = "%s\n" % path
