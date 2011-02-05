@@ -84,10 +84,11 @@ class DotFS(Fuse):
         """
 
         print "foo!"
-        yield Direntry('.')
-        yield Direntry('..')
+        yield Direntry('.', type=stat.S_IFDIR)
+        yield Direntry('..', type=stat.S_IFDIR)
         for x in os.listdir(J(self.absbase, path)):
-            yield Direntry(x)
+            fmt = stat.IFMT(os.stat(x).st_mode)
+            yield Direntry(x, fmt)
 
     def open(self, path, flags):
         x = open(J(abspath,path), flags)
