@@ -24,8 +24,12 @@ class DotFS(Fuse):
     def __init__(self, *args, **kw):
         Fuse.__init__(self, *args, **kw)
 
-        self.abspath
-        self.files = dict()
+        self.abspath = os.path.expanduser('~/.dotfs')
+        if not os.path.exists(self.abspath):
+            os.mkdir(self.abspath)
+        elif not os.path.isdir(self.abspath):
+            raise Exception("Problem with abspath")
+
         print 'Init complete.'
 
     def getattr(self, path):
@@ -117,7 +121,7 @@ class DotFS(Fuse):
         return 0
 
 if __name__ == __main__:
-    fs = NullFS()
+    fs = DotFS()
     fs.flags = 0
     fs.multithreaded = 0
     fs.main()
