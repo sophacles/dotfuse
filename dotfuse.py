@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import fuse
 from fuse import Fuse, Stat, Direntry
 
 from time import time
@@ -77,6 +78,7 @@ class DotFS(Fuse):
         return: [[('file1', 0), ('file2', 0), ... ]]
         """
 
+        print "foo!"
         yield Direntry('.')
         yield Direntry('..')
         for x in os.listdir(J(self.absbase, path)):
@@ -125,6 +127,6 @@ if __name__ == '__main__':
     fs = DotFS()
     fs.flags = 0
     fs.multithreaded = 0
-    f.parse()
+    fs.parse()
     fs.main()
 
