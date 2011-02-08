@@ -1,0 +1,50 @@
+Dotfuse.py
+
+This is a simple little fuse fs. It is designed to make the problem of
+composability in dotfiles solvable. Basically many configs "suck" when viewed
+in light of the notion of include, repetition, environment/context aware issues
+and so on. What this brings to the table is a full templating engine, jinja2.
+Now you can compose otherwise monolithic config files, and make them much more
+powerful.
+
+To run this you need python-fuse installed, as well as jinja2 (thats it!)
+
+Here is how it works. (still experimental right now!)
+
+Create two directories in your homedir called .dotfs/ and dotfstest/
+
+These directories are the "backing" filesystem and the "test target"
+respectively.  The backing fs exists to house the files we actually work with.
+This needs to be independant of the mounted fs (different location!) to avoid
+crazy unionfs type issues.  The "test target" dir exists mostly becasue I am
+scared to start trying in my actual home directory for now :P.
+
+What happens is the dotfuse just uses fuse mechanisms to wrap the basic
+functionality of the host FS. But, on file flush the system will recompile the
+templates associated with the relevant dotfile, and put them in the target dir.
+
+To make this work, just do:
+
+python dotfuse.py $mountpoint
+
+Then cd into $mountpoint. For each dotfile you wish to compose, create a
+directory _dotfile/
+
+For instance, this means that if you want .foorc composable, create a
+directory _foorc/
+
+In that directory you can setup whatever filestructure you wish, using jinja2
+style templating.  You won't get to pass in a context right now tho (this will
+maybe be fixed...). There is one required file however... in the example above
+this would be:
+
+foorc
+
+This file is what is loaded as the "template master", aka the tempalte on which
+the render() function is called.
+
+Once any file is written in _foorc the fs searches for foorc and runs that
+template. If this does not result in an error, the target dir ~/dotfstest/ will
+now contain a file .foorc
+
+
