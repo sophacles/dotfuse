@@ -21,6 +21,20 @@ def run_template(path):
         res = "%s%s\n" % (res, x)
     return res
 
+def log(string):
+    try:
+        fd = open('./logfile', 'a')
+        fd.write("ENTRY: %s\n" % string)
+        fd.close()
+    except Exception, e:
+        print '*****************ERROR*****************'
+        print 'while logging:'
+        print s
+        print 'got: ', e
+
+
+
+
 class DotFS(Fuse):
     """
     """
@@ -28,16 +42,15 @@ class DotFS(Fuse):
     def __init__(self, *args, **kw):
         Fuse.__init__(self, *args, **kw)
 
-        self.abspath = os.path.expanduser('~/.dotfs')
-        if not os.path.exists(self.abspath):
-            os.mkdir(self.abspath)
-        elif not os.path.isdir(self.abspath):
-            raise Exception("Problem with abspath")
+        self.absbase = os.path.expanduser('~/.dotfs')
+        if not os.path.exists(self.absbase):
+            os.mkdir(self.absbase)
+        elif not os.path.isdir(self.absbase):
+            raise Exception("Problem with absbase")
 
         # TODO: Put a context in here with whatever.
-        self.tmpl = jinja2.Environment(loader=jinja2.FileSystemLoader(self.abspath))
 
-        print 'Init complete.'
+        log( 'Init complete.')
 
     def getattr(self, path):
         """
@@ -55,9 +68,14 @@ class DotFS(Fuse):
         """
 
         # NOTE: what is this path? absolute, or relative to this fs?
+        log('getattr called on: %s' % (path,))
+        if path.startswith('/'): path = path[1:]
+
         try:
-            s = os.stat(J(self.absbase, path))
-            return Stat(
+            mypath =J(self.absbase, path)
+            #log('calling stat on: %s' % mypath)
+            s = os.stat(mypath)
+            res =  Stat(
                 st_mode=s.st_mode,
                 st_ino=s.st_ino,
                 st_dev=s.st_dev,
@@ -69,76 +87,257 @@ class DotFS(Fuse):
                 st_mtime=s.st_mtime,
                 st_ctime=s.st_ctime
                 )
-
+            log('returning: %s' %s)
+            return res
         except OSError, e:
-            return -e.errno
+            #log('Error! got: %s' % e)
+            raise
 
 
-    def readlink(self, path ):
-        print '*** readlink', path
-        return -errno.ENOSYS
+    def statfs(self, *args, **kw):
+        log('statfs called')
+        #pythonl has statvfs... just saying
+        st = fuse.StatVfs()
+        st.f_frsize = 0 #block_size
+        st.f_blocks = 0 #blocks
+        st.f_bfree = 0 #blocks_free
+        st.f_bavail = 0 #blocks_avail
+        st.f_files = 0 #files
+        st.f_ffree = 0 #files_free
+        st.f_flag = 0 #
+        st.f_namemax = 255
+        return  st
 
-    def readdir(self, path):
+    def unlink(self, path):
+        log('unlink called: %s' % (path, ))
+        try:
+            os.unlink(J(self.absbase,path[1:]))
+        except Exception, e:
+            log('unlink got: %s' % (e,))
+            raise e
+        return 0
+
+    def mkdir(self, path, mode):
+        log('mkdir called: %s %o' % (path, mode))
+        mypath = J(self.absbase, path[1:])
+        try:
+            os.mkdir(mypath, mode)
+        except Exception, e:
+            log('mkdir got error making %s: %s' % (mypath, e))
+            raise e
+
+        return 0
+
+    def readdir(self, path, offset):
         """
         return: [[('file1', 0), ('file2', 0), ... ]]
         """
 
-        print "foo!"
-        yield Direntry('.', type=stat.S_IFDIR)
-        yield Direntry('..', type=stat.S_IFDIR)
+        #log('readdir: %s, %s' % (path, offset))
+        path = path[1:]
+
+        yield Direntry('.')
+        yield Direntry('..')
         for x in os.listdir(J(self.absbase, path)):
-            fmt = stat.IFMT(os.stat(x).st_mode)
-            yield Direntry(x, fmt)
+            yield Direntry(x)
 
     def open(self, path, flags):
-        x = open(J(abspath,path), flags)
-        x.close()
-
-    def read(self, path, readlen, offset):
-        fsize = os.stat(J(self.abspath, path)).st_size
-        x = open(J(self.abspath, path), 'r')
-        x.seek(offset)
-        d = x.read(readlen)
-        if offset < fsize:
-            return x.read(readlen)
-        else:
-            return ''
-
-    def write(self, path, vals, offset):
-        x = open(J(self.abspath, path), 'r')
-        x.seek(offset)
-        written = x.write(vals)
-        x.close()
-        return written
-
-    def fsync(self, path, isfsyncfile):
-        if not path.startswith('_'):
-            return 0
-        first, rest = path.partition('/')[::2]
-        if not os.path.exists(J(self.abspath, first, first[1:])):
-            return 0
+        log('open called: %s %s' % (path, flags))
         try:
-            # First line testing, second, eventual production
-            x = run_template(J(self.abspath, first, first[1:]))
-            # self.render_config(J(first)/first[1:])
+            mypath = J(self.absbase,path[1:])
+            x = os.open(mypath, flags)
+            os.close(x)
         except Exception, e:
-            log('Exception running template for %s: %s' %
-                    (J(self.abspath, first, first[1:]), e))
-
-            return 0
-        fd = open(J(os.path.expanduser('~'), 'dotfstest', '.' + first[1:]))
-        fd.write(x)
-        fd.close()
+            log('open %s got error: %s' % (mypath, e))
+            raise e
         return 0
 
-    def render_config(self, path):
-        t = self.tmpl_render.get_template(path)
-        dfname = os.path.split()[-1]
-        dfname = os.path.expanduser("~/.%s" % dfname)
-        fd = open(dfname, 'w')
-        fd.write(t.render())
+    def read(self, path, readlen, offset):
+        log('read called: %s %s %s' % (path, readlen, offset))
+        mypath = J(self.absbase, path[1:])
+
+        fsize = os.stat(mypath).st_size
+        log('read opening %s' % mypath)
+        x = open(mypath, 'r')
+        x.seek(offset)
+        return x.read(readlen)
+
+    def write(self, path, vals, offset):
+        log('write called: %s %s %s' % (path, vals, offset))
+        mypath = J(self.absbase, path[1:])
+        x = open(mypath, 'w')
+        log('write! b')
+        #x.seek(offset)
+        written = x.write(vals)
+        x.close()
+        log('wrote: %s' % len(vals))
+        return len(vals)
+
+    def truncate(self, path, size):
+        log('truncate called: %s %s' %  (path, size))
+        fd = open(J(self.absbase, path[1:]), 'r+')
+        fd.truncate(size)
         fd.close()
 
+        return 0
+
+    def fsync(self, path, isfsyncfile):
+        log('fsync called: %s %s' % (path, isfsyncfile))
+        return 0
+
+    def flush(self, path):
+        log('flush called: %s' % (path, ))
+
+        path = path[1:]
+        if not path.startswith('_'):
+            log('not a tmplate path')
+            return 0
+        first, rest = path.partition('/')[::2]
+        if not os.path.exists(J(self.absbase, first, first[1:])):
+            log('no template base')
+            return 0
+        try:
+            log('templating!')
+            # First line testing, second, eventual production
+            # x = run_template(J(self.absbase, first))
+            x = self.render_config(first)
+        except Exception, e:
+            log('Exception running template for %s:(%s) %s' %
+                    (J(self.absbase, first, first[1:]),type(e), e))
+
+            return -errno.EIO
+
+        log('witing file')
+        try:
+            fd = open(J(os.path.expanduser('~'), 'dotfstest', '.' + first[1:]), 'w')
+            fd.write(x)
+            fd.close()
+            return 0
+
+        except Exception, e:
+            log('got error: %s' %e)
+            raise e
+
+    def render_config(self, ctxpath):
+        log('render_config: %s' % ctxpath)
+        fullctx = J(self.absbase,ctxpath)
+        fname = ctxpath[1:]
+        log('render_config: fullctx = %s; fname = %s' % (fullctx, fname))
+        tenv = jinja2.Environment(loader=jinja2.FileSystemLoader(fullctx))
+        log('render_config: loading')
+        t = tenv.get_template(fname)
+        log('render_config: actually rendering!')
+        res = t.render()
+        log('render_config: got:\n %s' % res)
+        return res
+
+    def create(self, path, flags, mode):
+        log('create called: %s %s %s' % (path, flags, mode))
+        mypath = J(self.absbase,path[1:])
+        try:
+            x = os.open(mypath, flags, stat.S_IMODE(mode))
+            os.close(x)
+            #fd = open(mypath, 'w', stat.S_IMODE(mode))
+            #fd.close()
+        except Exception, e:
+            log('(in create) opening %s got: %s' % (mypath, e))
+        return 0
+
+
+    ## GUESES
+
+    #def chmod(self, *args, **kw):
+    #    log('chmod called: %s %s' % (args, kw))
+    #    return -2
+
+    #def access(self, *args, **kw):
+    #    log('access called: %s %s' % (args, kw))
+    #    return -2
+
+    #def bmap(self, *args, **kw):
+    #    log('bmap called: %s %s' % (args, kw))
+    #    return 0
+    #def utimens(self, *args, **kw):
+    #    log('utimens called: %s %s' % (args, kw))
+    #    return 0
+    #def utime(self, *args, **kw):
+    #    log('utime called: %s %s' % (args, kw))
+    #    return 0
+
+    #def chown(self, *args, **kw):
+    #    log('chown called: %s %s' % (args, kw))
+    #    return 0
+
+    #def fgetattr(self, *args, **kw):
+    #    log('fgetattr called: %s %s' % (args, kw))
+    #    return 0
+
+    #def ftruncate(self, *args, **kw):
+    #    log('ftruncate called: %s %s' %  (args, kw))
+    #    return 0
+    #def lock(self, *args, **kw):
+    #    log('lock called: %s %s' % (args, kw))
+    #    return 0
+    #def release(self, *args, **kw):
+    #    log('release called: %s %s' % (args, kw))
+    #    return 0
+    #def mknod(self, *args, **kw):
+    #    log('mknod called: %s %s' % (args, kw))
+    #    return 0
+    #def fsyncdir(self, *args, **kw):
+    #    log('fsyncdir called: %s %s' % (args, kw))
+    #    return 0
+    #def link(self, *args, **kw):
+    #    log('link called: %s %s' % (args, kw))
+    #    return 0
+    #def readlink(self, *args, **kw):
+    #    log('readlink called: %s %s' % (args, kw))
+    #    return 0
+    #def rename(self, *args, **kw):
+    #    log('rename called: %s %s' % (args, kw))
+    #    return 0
+    #def symlink(self, *args, **kw):
+    #    log('symlink called: %s %s' % (args, kw))
+    #    return 0
+    #def rmdir(self, *args, **kw):
+    #    log('rmdir called: %s %s' % (args, kw))
+    #    return 0
+    #def opendir(self, *args, **kw):
+    #    log('opendir called: %s %s' % (args, kw))
+    #    return 0
+    #def releasedir(self, *args, **kw):
+    #    log('releasedir called: %s %s' % (args, kw))
+    #    return 0
+    #def fsinit(self, *args, **kw):
+    #    log('fsinit called: %s %s' % (args, kw))
+    #    return 0
+    #def fsdestroy(self, *args, **kw):
+    #    log('fsdestroy called: %s %s' % (args, kw))
+    #    return 0
+    #def setxattr(self, *args, **kw):
+    #    log('setxattr called: %s %s' % (args, kw))
+    #    return 0
+    #def getxattr(self, *args, **kw):
+    #    log('getxattr called: %s %s' % (args, kw))
+    #    return 0
+    #def removexattr(self, *args, **kw):
+    #    log('removexattr called: %s %s' % (args, kw))
+    #    return 0
+    #def listxattr(self, *args, **kw):
+    #    log('listxattr called: %s %s' % (args, kw))
+    #    return 0
+
+    # def __getattribute__(self, attr):
+    #     s = "looking for %s\n " % attr
+    #     try:
+    #         res = Fuse.__getattribute__(self, attr)
+    #     except Exception, e:
+    #         s += "\tgot excepton: %s" % e
+    #         log(s)
+    #         raise e
+    #     s += "\tgot: %s" % res
+    #     log(s)
+    #     return res
 
 if __name__ == '__main__':
     fs = DotFS()
