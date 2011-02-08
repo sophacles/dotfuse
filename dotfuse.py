@@ -16,12 +16,14 @@ import jinja2
 fuse.fuse_python_api = (0, 2)
 
 def run_template(path):
+    ''' dummy method to avoid conflating fs errors and jinja errors'''
     res = "%s\n" % path
     for x in os.walk(path):
         res = "%s%s\n" % (res, x)
     return res
 
 def log(string):
+    return
     try:
         fd = open('./logfile', 'a')
         fd.write("ENTRY: %s\n" % string)
