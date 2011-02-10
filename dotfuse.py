@@ -16,7 +16,10 @@ import jinja2
 fuse.fuse_python_api = (0, 2)
 
 def run_template(path):
-    ''' dummy method to avoid conflating fs errors and jinja errors'''
+    ''' dummy method to avoid conflating fs errors and jinja errors
+    Updated to provide a listing according to the fs at runtime,
+    potentially making this a nice little debugging tool
+    '''
     res = "%s\n" % path
     for x in os.walk(path):
         res = "%s%s\n" % (res, x)
@@ -44,32 +47,25 @@ class DotFS(Fuse):
     def __init__(self, *args, **kw):
         Fuse.__init__(self, *args, **kw)
 
+        # TODO: Command line parameters to add:
+        #   -b : fs base (absbase)
+        #   -e : python file containing various environment params globally
+        #   -t : target dir, place to write resultant files (and make default ~)
+        #   -l : turn on logging (to file -lf)
+
         self.absbase = os.path.expanduser('~/.dotfs')
         if not os.path.exists(self.absbase):
             os.mkdir(self.absbase)
         elif not os.path.isdir(self.absbase):
             raise Exception("Problem with absbase")
 
-        # TODO: Put a context in here with whatever.
-
         log( 'Init complete.')
 
     def getattr(self, path):
         """
-        - st_mode (protection bits)
-        - st_ino (inode number)
-        - st_dev (device)
-        - st_nlink (number of hard links)
-        - st_uid (user ID of owner)
-        - st_gid (group ID of owner)
-        - st_size (size of file, in bytes)
-        - st_atime (time of most recent access)
-        - st_mtime (time of most recent content modification)
-        - st_ctime (platform dependent; time of most recent metadata change on Unix,
-                    or the time of creation on Windows).
+        return the result of os.stat on the real fs object represented by path.
         """
 
-        # NOTE: what is this path? absolute, or relative to this fs?
         log('getattr called on: %s' % (path,))
         if path.startswith('/'): path = path[1:]
 
@@ -92,25 +88,33 @@ class DotFS(Fuse):
             log('returning: %s' %s)
             return res
         except OSError, e:
-            #log('Error! got: %s' % e)
+            log('Error! got: %s' % e)
             raise
 
 
-    def statfs(self, *args, **kw):
+    def statfs(self, path):
+        ''' return a statvfs object about the underlining base fs'''
         log('statfs called')
         #pythonl has statvfs... just saying
+        s = os.statvfs(J(self.absbase, path[1:]))
+
+        # someday fix up fuse to do this crap for us.. take a statvfs object and
+        # return a fuse.StatVfs from it... souts simple enough, right?
         st = fuse.StatVfs()
-        st.f_frsize = 0 #block_size
-        st.f_blocks = 0 #blocks
-        st.f_bfree = 0 #blocks_free
-        st.f_bavail = 0 #blocks_avail
-        st.f_files = 0 #files
-        st.f_ffree = 0 #files_free
-        st.f_flag = 0 #
-        st.f_namemax = 255
+        st.f_bsize = s.f_bsize
+        st.f_frsize = s.f_frsize
+        st.f_blocks = s.f_blocks
+        st.f_bfree = s.f_bfree
+        st.f_bavail = s.f_bavail
+        st.f_files = s.f_files
+        st.f_ffree = s.f_ffree
+        st.f_favail = s.f_favail
+        st.f_flag = s.f_flag
+        st.f_namemax = s.f_namemax
         return  st
 
     def unlink(self, path):
+        '''file deletion method, pasthru to os module equiv'''
         log('unlink called: %s' % (path, ))
         try:
             os.unlink(J(self.absbase,path[1:]))
@@ -120,6 +124,7 @@ class DotFS(Fuse):
         return 0
 
     def mkdir(self, path, mode):
+        '''make a directory. passthrough to os module equiv'''
         log('mkdir called: %s %o' % (path, mode))
         mypath = J(self.absbase, path[1:])
         try:
@@ -132,6 +137,8 @@ class DotFS(Fuse):
 
     def readdir(self, path, offset):
         """
+        used in things like file listings and whatnot
+        thin wrapper on os.listdir
         return: [[('file1', 0), ('file2', 0), ... ]]
         """
 
@@ -144,8 +151,14 @@ class DotFS(Fuse):
             yield Direntry(x)
 
     def open(self, path, flags):
+        ''' tries to open the file, then closes it right away.
+        makes sure the file exists etc, but doesn't track anything.
+        basically a "make the fs happy" method
+        '''
         log('open called: %s %s' % (path, flags))
         try:
+            # TODO: make o_append an invalid flag, as that crap
+            # is a pain to track. alternately include it, but good luck :P
             mypath = J(self.absbase,path[1:])
             x = os.open(mypath, flags)
             os.close(x)
@@ -155,6 +168,10 @@ class DotFS(Fuse):
         return 0
 
     def read(self, path, readlen, offset):
+        ''' Open a file, read the appropriate chunks, close.  One of many
+        reasons this fs shouldn't be used for serious work outside the
+        dotfiles.  This would be really inefficient in high load scenarios'''
+
         log('read called: %s %s %s' % (path, readlen, offset))
         mypath = J(self.absbase, path[1:])
 
@@ -162,9 +179,19 @@ class DotFS(Fuse):
         log('read opening %s' % mypath)
         x = open(mypath, 'r')
         x.seek(offset)
-        return x.read(readlen)
+        res x.read(readlen)
+        x.close()
+        return res
 
     def write(self, path, vals, offset):
+        ''' Open the file with mode 'w' then write to it. Note, this means that
+        every call to write is a full fledged truncat/write scenario. Some
+        might consider this a bug, but for now it works as that is how vim
+        seems to work for my testing purposes. Blocking and therefore writes
+        the whole file. Also haven't tested with files biger than 4096. Hrm...
+        more potential issues there :/
+        '''
+
         log('write called: %s %s %s' % (path, vals, offset))
         mypath = J(self.absbase, path[1:])
         x = open(mypath, 'w')
@@ -176,6 +203,7 @@ class DotFS(Fuse):
         return len(vals)
 
     def truncate(self, path, size):
+        '''pasthrough to os.truncate'''
         log('truncate called: %s %s' %  (path, size))
         fd = open(J(self.absbase, path[1:]), 'r+')
         fd.truncate(size)
@@ -184,10 +212,17 @@ class DotFS(Fuse):
         return 0
 
     def fsync(self, path, isfsyncfile):
+        ''' don't want to do anything here, but not implementing it is a pita'''
         log('fsync called: %s %s' % (path, isfsyncfile))
         return 0
 
     def flush(self, path):
+        '''this is the meat and potatoes of this fs. see the docs for details on how
+        it works, but in short it is awesome.'''
+
+        # TODO: implement a way to get code loaded from _$first/$first.py?
+        #   pros: not really any less secure at thise point
+        #   cons: crash the fs? break other things?
         log('flush called: %s' % (path, ))
 
         path = path[1:]
@@ -221,6 +256,9 @@ class DotFS(Fuse):
             raise e
 
     def render_config(self, ctxpath):
+        ''' just separating out the crap for jinja and the file traking.
+        also may allow for some sort of strategy pattern on rendering in the
+        future if this takes off or something'''
         log('render_config: %s' % ctxpath)
         fullctx = J(self.absbase,ctxpath)
         fname = ctxpath[1:]
@@ -234,6 +272,9 @@ class DotFS(Fuse):
         return res
 
     def create(self, path, flags, mode):
+        '''implements the stuff for o_create so various things
+        can be happy (like touch)'''
+
         log('create called: %s %s %s' % (path, flags, mode))
         mypath = J(self.absbase,path[1:])
         try:
@@ -246,7 +287,13 @@ class DotFS(Fuse):
         return 0
 
 
-    ## GUESES
+    ## Stubs for all the other potenially called functions. Maybe figure out
+    ## A beter place for them, but they turn out to be useful enough to bugging that
+    #@ not having them is a pain in the butt
+
+    # TODO: implement a test harness type metaclass for this, wwhere the full list of
+    # potential functions is iterated, and the ones without actual implementations get
+    # the stubs like below
 
     #def chmod(self, *args, **kw):
     #    log('chmod called: %s %s' % (args, kw))
@@ -328,6 +375,8 @@ class DotFS(Fuse):
     #def listxattr(self, *args, **kw):
     #    log('listxattr called: %s %s' % (args, kw))
     #    return 0
+
+    ## Different type of debugging. Also add to experimental coding thing?
 
     # def __getattribute__(self, attr):
     #     s = "looking for %s\n " % attr
